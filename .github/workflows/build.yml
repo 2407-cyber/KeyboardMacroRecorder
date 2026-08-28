@@ -1,1 +1,35 @@
+name: 构建 Windows EXE
 
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: 下载代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller pynput keyboard
+
+      - name: 编译 EXE
+        run: |
+          pyinstaller --onefile --windowed --name "键盘宏" keyboard_macro_recorder_v4.py
+
+      - name: 上传 EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: 键盘宏-Windows
+          path: dist/键盘宏.exe
