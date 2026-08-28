@@ -24,6 +24,24 @@ from tkinter import ttk, filedialog, messagebox
 user32 = ctypes.windll.user32
 kernel32 = ctypes.windll.kernel32
 
+# 64-bit Windows/ctypes compatibility: explicitly declare pointer-sized types.
+user32.SetWindowsHookExW.argtypes = [
+    ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, wintypes.DWORD
+]
+user32.SetWindowsHookExW.restype = ctypes.c_void_p
+user32.UnhookWindowsHookEx.argtypes = [ctypes.c_void_p]
+user32.UnhookWindowsHookEx.restype = wintypes.BOOL
+user32.CallNextHookEx.argtypes = [
+    ctypes.c_void_p, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM
+]
+user32.CallNextHookEx.restype = ctypes.c_ssize_t
+user32.GetMessageW.argtypes = [
+    ctypes.POINTER(wintypes.MSG), wintypes.HWND, wintypes.UINT, wintypes.UINT
+]
+user32.GetMessageW.restype = wintypes.BOOL
+kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
+kernel32.GetModuleHandleW.restype = ctypes.c_void_p
+
 WH_KEYBOARD_LL = 13
 WM_KEYDOWN = 0x0100
 WM_KEYUP = 0x0101
@@ -163,65 +181,71 @@ class App:
         self.root.protocol("WM_DELETE_WINDOW", self.close)
 
     def _build_ui(self):
-        ttk.Label(
+        # 简洁 Windows 风格界面：保留原有功能，减少说明文字和控件数量。
+        self.root.geometry("720x680")
+        self.root.minsize(680, 620)
+
+        title = ttk.Label(
             self.root, text="键盘快捷键录制器 v3",
-            font=("Microsoft YaHei UI", 17, "bold")
-        ).pack(anchor="w", padx=14, pady=(10, 2))
+            font=("Microsoft YaHei UI", 16, "bold")
+        )
+        title.pack(anchor="w", padx=14, pady=(12, 6))
 
-        bar = ttk.Frame(self.root)
-        bar.pack(fill="x", padx=14, pady=(0, 8))
-        ttk.Label(bar, textvariable=self.status).pack(side="left")
+        # 顶部操作
+        top = ttk.Frame(self.root)
+        top.pack(fill="x", padx=14, pady=(0, 8))
+        self.rec_btn = ttk.Button(top, text="开始录制", command=self.toggle_record)
+        self.rec_btn.pack(side="left")
+        self.play_btn = ttk.Button(top, text="播放", command=self.start_play)
+        self.play_btn.pack(side="left", padx=8)
+        ttk.Button(top, text="停止", command=self.stop_play).pack(side="left")
+        ttk.Button(top, text="清空", command=self.clear).pack(side="left", padx=8)
+        ttk.Label(top, textvariable=self.status).pack(side="right")
 
-        box = ttk.LabelFrame(self.root, text="真实键盘事件")
-        box.pack(fill="both", expand=True, padx=14, pady=5)
-
-        cols = ("no", "action", "key", "wait", "time")
-        self.tree = ttk.Treeview(box, columns=cols, show="headings")
+        # 录制列表
+        box = ttk.LabelFrame(self.root, text="已录制的事件")
+        box.pack(fill="both", expand=True, padx=14, pady=4)
+        cols = ("no", "action", "key", "wait")
+        self.tree = ttk.Treeview(box, columns=cols, show="headings", height=12)
         self.tree.heading("no", text="序号")
         self.tree.heading("action", text="动作")
         self.tree.heading("key", text="按键")
-        self.tree.heading("wait", text="与上一事件间隔(ms)")
-        self.tree.heading("time", text="累计时间(ms)")
-        self.tree.column("no", width=60, anchor="center")
-        self.tree.column("action", width=100, anchor="center")
-        self.tree.column("key", width=250, anchor="center")
-        self.tree.column("wait", width=180, anchor="center")
-        self.tree.column("time", width=180, anchor="center")
-        self.tree.pack(side="left", fill="both", expand=True)
-
+        self.tree.heading("wait", text="间隔(ms)")
+        self.tree.column("no", width=55, anchor="center")
+        self.tree.column("action", width=90, anchor="center")
+        self.tree.column("key", width=260, anchor="center")
+        self.tree.column("wait", width=110, anchor="center")
+        self.tree.pack(side="left", fill="both", expand=True, padx=(6, 0), pady=6)
         scroll = ttk.Scrollbar(box, orient="vertical", command=self.tree.yview)
-        scroll.pack(side="right", fill="y")
+        scroll.pack(side="right", fill="y", padx=(0, 6), pady=6)
         self.tree.configure(yscrollcommand=scroll.set)
+        self.tree.bind("<Double-1>", lambda e: self.edit_wait())
 
-        controls = ttk.Frame(self.root)
-        controls.pack(fill="x", padx=14, pady=7)
-        self.rec_btn = ttk.Button(controls, text="● 开始录制", command=self.toggle_record)
-        self.rec_btn.pack(side="left")
-        ttk.Button(controls, text="清空", command=self.clear).pack(side="left", padx=7)
-        self.play_btn = ttk.Button(controls, text="▶ 播放", command=self.start_play)
-        self.play_btn.pack(side="left", padx=7)
-        ttk.Button(controls, text="■ 停止", command=self.stop_play).pack(side="left", padx=7)
-        ttk.Label(controls, text="默认等待(ms)：").pack(side="left", padx=(20, 5))
-        ttk.Entry(controls, textvariable=self.default_wait, width=8).pack(side="left")
-        ttk.Button(controls, text="应用到全部", command=self.apply_wait).pack(side="left", padx=6)
-        ttk.Button(controls, text="修改选中", command=self.edit_wait).pack(side="left", padx=6)
+        # 间隔设置
+        timing = ttk.LabelFrame(self.root, text="间隔时间")
+        timing.pack(fill="x", padx=14, pady=5)
+        ttk.Label(timing, text="默认等待时间(ms)：").pack(side="left", padx=(10, 5), pady=8)
+        ttk.Entry(timing, textvariable=self.default_wait, width=8).pack(side="left")
+        ttk.Button(timing, text="应用到全部", command=self.apply_wait).pack(side="left", padx=8)
+        ttk.Button(timing, text="修改选中", command=self.edit_wait).pack(side="left")
 
-        settings = ttk.LabelFrame(self.root, text="全局播放控制")
+        # 播放设置
+        settings = ttk.LabelFrame(self.root, text="播放设置")
         settings.pack(fill="x", padx=14, pady=5)
-        ttk.Label(settings, text="播放热键：").grid(row=0, column=0, padx=8, pady=7)
-        ttk.Entry(settings, textvariable=self.play_hotkey, width=14).grid(row=0, column=1)
-        ttk.Label(settings, text="停止热键：").grid(row=0, column=2, padx=8)
-        ttk.Entry(settings, textvariable=self.stop_hotkey, width=14).grid(row=0, column=3)
+        ttk.Label(settings, text="播放热键：").grid(row=0, column=0, padx=(10, 4), pady=7, sticky="w")
+        ttk.Entry(settings, textvariable=self.play_hotkey, width=10).grid(row=0, column=1, sticky="w")
+        ttk.Label(settings, text="停止热键：").grid(row=0, column=2, padx=(18, 4), sticky="w")
+        ttk.Entry(settings, textvariable=self.stop_hotkey, width=10).grid(row=0, column=3, sticky="w")
         ttk.Button(settings, text="应用热键", command=self.register_hotkeys).grid(row=0, column=4, padx=8)
-        ttk.Label(settings, text="播放次数（0=无限）：").grid(row=0, column=5, padx=8)
-        ttk.Entry(settings, textvariable=self.play_count, width=10).grid(row=0, column=6)
-        ttk.Button(settings, text="保存", command=self.save_config).grid(row=1, column=1, pady=7)
-        ttk.Button(settings, text="加载", command=self.load_config).grid(row=1, column=2, pady=7)
+        ttk.Label(settings, text="播放次数(0=无限)：").grid(row=1, column=0, padx=(10, 4), pady=7, sticky="w")
+        ttk.Entry(settings, textvariable=self.play_count, width=10).grid(row=1, column=1, sticky="w")
+        ttk.Button(settings, text="保存配置", command=self.save_config).grid(row=1, column=3, padx=8, sticky="w")
+        ttk.Button(settings, text="加载配置", command=self.load_config).grid(row=1, column=4, padx=8, sticky="w")
 
         ttk.Label(
             self.root,
-            text="录制时会保存真实 KEYDOWN/KEYUP 时间。按住 Ctrl/Shift/Alt/Win 再按其他键，会自然形成组合键；双击事件可调整等待时间。",
-            wraplength=880
+            text="录制时直接按键即可，支持 Ctrl / Shift / Alt / Win 与任意按键组合；双击列表项目可修改间隔。",
+            wraplength=680
         ).pack(anchor="w", padx=14, pady=(5, 10))
 
     def refresh(self):
@@ -267,8 +291,12 @@ class App:
             WH_KEYBOARD_LL, self.hook_proc, kernel32.GetModuleHandleW(None), 0
         )
         if not self.hook_handle:
+            err = ctypes.get_last_error()
             self.root.after(0, lambda: messagebox.showerror(
-                "错误", "无法安装全局键盘钩子，请尝试以管理员身份运行。"))
+                "错误",
+                f"无法安装全局键盘钩子。\\nWindows 错误代码：{err}\\n\\n"
+                "如果仍失败，请把这个错误代码发给我。"
+            ))
             self.root.after(0, self.stop_record)
             return
         msg = wintypes.MSG()
