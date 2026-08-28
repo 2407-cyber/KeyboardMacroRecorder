@@ -84,7 +84,7 @@ class INPUT(ctypes.Structure):
 
 
 HOOKPROC = ctypes.WINFUNCTYPE(
-    wintypes.LRESULT, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM
+    ctypes.c_ssize_t, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM
 )
 
 VK_NAMES = {
