@@ -182,8 +182,8 @@ class App:
     def __init__(self, root):
         self.root = root
         self.root.title("键盘宏")
-        self.root.geometry("350x500")
-        self.root.minsize(350, 500)
+        self.root.geometry("400x600")
+        self.root.minsize(400, 600)
         self.root.configure(bg="#ffffff")
 
         self.events = []
