@@ -182,8 +182,8 @@ class App:
     def __init__(self, root):
         self.root = root
         self.root.title("键盘宏")
-        self.root.geometry("500x300")
-        self.root.minsize(500, 300)
+        self.root.geometry("350x500")
+        self.root.minsize(350, 500)
         self.root.configure(bg="#ffffff")
 
         self.events = []
@@ -211,7 +211,7 @@ class App:
         self._build_ui()
         self._load_config_names()
         self.root.update_idletasks()
-        w, h = 500, 300
+        w, h = 350, 500
         sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
         self.root.geometry(f"{w}x{h}+{max(0,(sw-w)//2)}+{max(0,(sh-h)//2)}")
         self._start_hotkey_thread()
@@ -222,173 +222,291 @@ class App:
         return ("Microsoft YaHei UI", size, "bold" if bold else "normal")
 
     def _build_ui(self):
-        # 500x300 紧凑布局：所有信息同时可见，必要时仍可手动放大窗口。
-        outer = tk.Frame(self.root, bg="#ffffff", highlightthickness=0)
-        outer.pack(fill="both", expand=True, padx=8, pady=6)
+        # 350x500 纵向紧凑布局：无图标、无重复标题，重点操作一目了然。
+        root = self.root
 
-        # 标题
-        title = tk.Frame(outer, bg="#ffffff", height=28)
-        title.pack(fill="x")
-        title.pack_propagate(False)
-        tk.Label(
-            title, text="🪶  键盘宏", bg="#ffffff", fg="#111111",
-            font=self._font(13, True)
-        ).pack(side="left", padx=2)
-        tk.Label(
-            title, textvariable=self.status, bg="#ffffff", fg="#111111",
+        outer = tk.Frame(root, bg="#f5f6f8")
+        outer.pack(fill="both", expand=True)
+
+        # 顶部功能区
+        top = tk.Frame(outer, bg="#f5f6f8")
+        top.pack(fill="x", padx=8, pady=(8, 5))
+
+        # 两行按钮，避免横向拥挤
+        self.rec_btn = self._main_button(top, "开始录制", self.toggle_record)
+        self.play_btn = self._main_button(top, "播放", self.start_play)
+        self.stop_btn = self._main_button(top, "停止", self.stop_play)
+        self.clear_btn = self._main_button(top, "清空", self.clear)
+        self.settings_btn = self._main_button(top, "设置", self.open_settings)
+
+        first = [self.rec_btn, self.play_btn, self.stop_btn]
+        for i, b in enumerate(first):
+            b.grid(row=0, column=i, sticky="ew", padx=2, pady=2)
+            top.grid_columnconfigure(i, weight=1)
+
+        second = [self.clear_btn, self.settings_btn]
+        for i, b in enumerate(second):
+            b.grid(row=1, column=i, sticky="ew", padx=2, pady=2)
+        top.grid_columnconfigure(0, weight=1)
+        top.grid_columnconfigure(1, weight=1)
+
+        # 状态
+        self.status_label = tk.Label(
+            top, textvariable=self.status,
+            bg="#f5f6f8", fg="#5f6368",
             font=self._font(8)
-        ).pack(side="right", padx=4)
+        )
+        self.status_label.grid(row=2, column=0, columnspan=3, sticky="e", padx=3, pady=(1, 0))
 
-        # 顶部操作按钮
-        actions = tk.Frame(outer, bg="#ffffff")
-        actions.pack(fill="x", pady=(2, 5))
+        # 配置区
+        cfg = tk.LabelFrame(
+            outer, text="快捷键配置",
+            bg="#ffffff", fg="#333333",
+            font=self._font(8, True),
+            bd=1, relief="solid",
+            padx=5, pady=5
+        )
+        cfg.pack(fill="x", padx=8, pady=(0, 5))
 
-        btn_specs = [
-            ("● 录制", self.toggle_record),
-            ("▶ 播放", self.start_play),
-            ("■ 停止", self.stop_play),
-            ("⌫ 清空", self.clear),
-            ("⚙ 设置", self.open_settings),
-        ]
-        self.rec_btn = self._small_button(actions, *btn_specs[0])
-        self.play_btn = self._small_button(actions, *btn_specs[1])
-        self.stop_btn = self._small_button(actions, *btn_specs[2])
-        self.clear_btn = self._small_button(actions, *btn_specs[3])
-        self.settings_btn = self._small_button(actions, *btn_specs[4])
+        top_cfg = tk.Frame(cfg, bg="#ffffff")
+        top_cfg.pack(fill="x")
 
-        for i, b in enumerate(
-            [self.rec_btn, self.play_btn, self.stop_btn, self.clear_btn, self.settings_btn]
-        ):
-            b.grid(row=0, column=i, sticky="ew", padx=2)
-            actions.grid_columnconfigure(i, weight=1)
-
-        # 配置选择
-        cfg = tk.Frame(outer, bg="#ffffff")
-        cfg.pack(fill="x", pady=(0, 5))
         tk.Label(
-            cfg, text="配置：", bg="#ffffff", fg="#111111", font=self._font(9)
-        ).pack(side="left", padx=(2, 4))
+            top_cfg, text="配置",
+            bg="#ffffff", fg="#333333",
+            font=self._font(8)
+        ).pack(side="left")
 
         self.config_combo = ttk.Combobox(
-            cfg, textvariable=self.current_config,
-            state="readonly", font=self._font(9), height=8
+            top_cfg,
+            textvariable=self.current_config,
+            state="readonly",
+            font=self._font(8),
+            height=8
         )
-        self.config_combo.pack(side="left", fill="x", expand=True, ipady=1)
-        self.config_combo.bind("<<ComboboxSelected>>", lambda e: self._switch_config())
+        self.config_combo.pack(side="left", fill="x", expand=True, padx=(5, 4), ipady=0)
+        self.config_combo.bind(
+            "<<ComboboxSelected>>",
+            lambda _e: self._switch_config()
+        )
+
+        bottom_cfg = tk.Frame(cfg, bg="#ffffff")
+        bottom_cfg.pack(fill="x", pady=(4, 0))
 
         for text, cmd in [
             ("新建", self.new_config),
             ("重命名", self.rename_config),
             ("删除", self.delete_config),
         ]:
-            self._compact_button(cfg, text, cmd).pack(side="left", padx=(4, 0))
+            self._small_text_button(
+                bottom_cfg, text, cmd
+            ).pack(side="left", fill="x", expand=True, padx=2)
 
         # 动作列表
-        list_box = tk.Frame(
-            outer, bg="#ffffff",
-            highlightbackground="#d9dfe7", highlightthickness=1
+        list_box = tk.LabelFrame(
+            outer, text="动作列表",
+            bg="#ffffff", fg="#333333",
+            font=self._font(8, True),
+            bd=1, relief="solid",
+            padx=4, pady=4
         )
-        list_box.pack(fill="both", expand=True, pady=(0, 5))
+        list_box.pack(fill="both", expand=True, padx=8, pady=(0, 5))
+
+        header = tk.Frame(list_box, bg="#ffffff")
+        header.pack(fill="x", padx=2, pady=(0, 3))
 
         self.list_title = tk.Label(
-            list_box, text="动作列表（共 0 个动作）",
-            bg="#ffffff", fg="#111111",
-            font=self._font(9, True), anchor="w"
+            header,
+            text="共 0 个动作",
+            bg="#ffffff", fg="#666666",
+            font=self._font(7)
         )
-        self.list_title.pack(fill="x", padx=8, pady=(4, 2))
+        self.list_title.pack(side="right")
 
-        table_frame = tk.Frame(list_box, bg="#ffffff")
-        table_frame.pack(fill="both", expand=True, padx=6, pady=(0, 5))
+        table = tk.Frame(list_box, bg="#ffffff")
+        table.pack(fill="both", expand=True)
 
-        cols = ("no", "action", "key", "state", "wait", "total")
+        cols = ("no", "action", "key", "wait")
         self.tree = ttk.Treeview(
-            table_frame, columns=cols, show="headings",
+            table,
+            columns=cols,
+            show="headings",
             selectmode="browse"
         )
-        headings = [
+        for col, text in [
             ("no", "序号"),
             ("action", "动作"),
             ("key", "按键"),
-            ("state", "状态"),
-            ("wait", "间隔"),
-            ("total", "累计"),
-        ]
-        for col, text in headings:
+            ("wait", "间隔(ms)"),
+        ]:
             self.tree.heading(col, text=text)
-            self.tree.column(col, width=55, minwidth=40, anchor="center", stretch=True)
+        self.tree.column("no", width=32, minwidth=28, anchor="center", stretch=False)
+        self.tree.column("action", width=54, minwidth=44, anchor="center", stretch=False)
+        self.tree.column("key", width=90, minwidth=65, anchor="center", stretch=True)
+        self.tree.column("wait", width=62, minwidth=55, anchor="center", stretch=False)
+
         self.tree.pack(side="left", fill="both", expand=True)
+        sb = ttk.Scrollbar(table, orient="vertical", command=self.tree.yview)
+        sb.pack(side="right", fill="y")
+        self.tree.configure(yscrollcommand=sb.set)
+        self.tree.bind("<Double-1>", lambda _e: self.edit_wait())
 
-        scroll = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree.yview)
-        scroll.pack(side="right", fill="y")
-        self.tree.configure(yscrollcommand=scroll.set)
-        self.tree.bind("<Double-1>", lambda e: self.edit_wait())
-
-        # 底部：2x2 小设置块
-        bottom = tk.Frame(
-            outer, bg="#ffffff",
-            highlightbackground="#d9dfe7", highlightthickness=1
+        # 运行设置
+        run = tk.LabelFrame(
+            outer, text="播放设置",
+            bg="#ffffff", fg="#333333",
+            font=self._font(8, True),
+            bd=1, relief="solid",
+            padx=5, pady=5
         )
-        bottom.pack(fill="x")
+        run.pack(fill="x", padx=8, pady=(0, 8))
 
-        fields = tk.Frame(bottom, bg="#ffffff")
-        fields.pack(fill="x", padx=5, pady=4)
+        row1 = tk.Frame(run, bg="#ffffff")
+        row1.pack(fill="x", pady=1)
 
-        field_specs = [
-            ("播放热键", self.play_hotkey),
-            ("停止热键", self.stop_hotkey),
-            ("播放次数", self.play_count),
-            ("默认间隔", self.default_wait),
-        ]
-        for idx, (label, variable) in enumerate(field_specs):
-            r, c = divmod(idx, 2)
-            box = tk.Frame(fields, bg="#ffffff")
-            box.grid(row=r, column=c, sticky="ew", padx=4, pady=2)
-            fields.grid_columnconfigure(c, weight=1)
-            tk.Label(box, text=label, bg="#ffffff", fg="#111111",
-                     font=self._font(8)).pack(side="left")
-            ent = ttk.Entry(box, textvariable=variable, font=self._font(8), width=8)
-            ent.pack(side="right", fill="x", expand=True, padx=(6, 0), ipady=0)
+        tk.Label(row1, text="播放热键", bg="#ffffff", fg="#333333",
+                 font=self._font(7)).pack(side="left")
+        tk.Label(row1, textvariable=self.play_hotkey, bg="#eef5ff", fg="#1a4f8c",
+                 font=self._font(7, True), width=8, anchor="center").pack(side="left", padx=(4, 3))
+        self._small_text_button(
+            row1, "修改", self.open_hotkey_dialog
+        ).pack(side="left")
+
+        tk.Label(row1, text="停止", bg="#ffffff", fg="#333333",
+                 font=self._font(7)).pack(side="left", padx=(8, 3))
+        tk.Label(row1, textvariable=self.stop_hotkey, bg="#eef5ff", fg="#1a4f8c",
+                 font=self._font(7, True), width=8, anchor="center").pack(side="left", padx=(0, 3))
+        self._small_text_button(
+            row1, "修改", self.open_hotkey_dialog
+        ).pack(side="left")
+
+        row2 = tk.Frame(run, bg="#ffffff")
+        row2.pack(fill="x", pady=(4, 1))
+
+        tk.Label(row2, text="播放次数", bg="#ffffff", fg="#333333",
+                 font=self._font(7)).pack(side="left")
+        count = ttk.Entry(row2, textvariable=self.play_count, width=7, font=self._font(8))
+        count.pack(side="left", padx=(4, 8))
+
+        tk.Label(row2, text="默认间隔", bg="#ffffff", fg="#333333",
+                 font=self._font(7)).pack(side="left")
+        wait = ttk.Entry(row2, textvariable=self.default_wait, width=7, font=self._font(8))
+        wait.pack(side="left", padx=(4, 2))
+        tk.Label(row2, text="ms", bg="#ffffff", fg="#666666",
+                 font=self._font(7)).pack(side="left")
+
+        self._small_text_button(
+            row2, "应用全部", self.apply_wait
+        ).pack(side="right")
 
         style = ttk.Style()
         try:
             style.theme_use("clam")
         except Exception:
             pass
+
         style.configure(
-            "Treeview", font=self._font(8), rowheight=18,
-            background="#ffffff", fieldbackground="#ffffff",
-            foreground="#111111", borderwidth=0
+            "Treeview",
+            font=self._font(7),
+            rowheight=19,
+            background="#ffffff",
+            fieldbackground="#ffffff",
+            foreground="#202124",
+            borderwidth=0
         )
         style.configure(
-            "Treeview.Heading", font=self._font(8, True),
-            background="#f5f7fa", foreground="#111111",
-            relief="flat", padding=2
+            "Treeview.Heading",
+            font=self._font(7, True),
+            background="#eef2f7",
+            foreground="#202124",
+            relief="flat",
+            padding=2
         )
         style.map(
             "Treeview",
-            background=[("selected", "#e7f1fb")],
-            foreground=[("selected", "#111111")]
+            background=[("selected", "#dbeafe")],
+            foreground=[("selected", "#111827")]
         )
         style.configure("TCombobox", font=self._font(8), padding=1)
         style.configure("TEntry", font=self._font(8), padding=1)
 
-    def _small_button(self, parent, text, command):
+    def _main_button(self, parent, text, command):
         return tk.Button(
             parent, text=text, command=command,
-            font=self._font(9), bg="#ffffff", fg="#111111",
-            activebackground="#f2f5f8", activeforeground="#111111",
-            relief="solid", bd=1, highlightthickness=0,
-            cursor="hand2", padx=2, pady=5
+            font=self._font(9),
+            bg="#ffffff", fg="#222222",
+            activebackground="#e9eef5",
+            activeforeground="#111111",
+            relief="solid", bd=1,
+            highlightthickness=0,
+            cursor="hand2",
+            padx=2, pady=5
         )
 
-    def _compact_button(self, parent, text, command):
+    def _small_text_button(self, parent, text, command):
         return tk.Button(
             parent, text=text, command=command,
-            font=self._font(8), bg="#ffffff", fg="#111111",
-            activebackground="#f2f5f8", activeforeground="#111111",
-            relief="solid", bd=1, highlightthickness=0,
-            cursor="hand2", padx=4, pady=2
+            font=self._font(7),
+            bg="#ffffff", fg="#333333",
+            activebackground="#e9eef5",
+            activeforeground="#111111",
+            relief="solid", bd=1,
+            highlightthickness=0,
+            cursor="hand2",
+            padx=5, pady=2
         )
+
+    def open_hotkey_dialog(self):
+        win = tk.Toplevel(self.root)
+        win.title("设置播放热键")
+        win.resizable(False, False)
+        win.configure(bg="#ffffff")
+        win.transient(self.root)
+        win.grab_set()
+
+        frame = tk.Frame(win, bg="#ffffff")
+        frame.pack(padx=14, pady=12)
+
+        tk.Label(
+            frame, text="播放热键",
+            bg="#ffffff", fg="#222222",
+            font=self._font(8, True)
+        ).grid(row=0, column=0, sticky="w", pady=4)
+
+        play_entry = ttk.Entry(
+            frame, textvariable=self.play_hotkey, width=16,
+            font=self._font(8)
+        )
+        play_entry.grid(row=0, column=1, padx=(10, 0))
+        play_entry.focus_set()
+
+        tk.Label(
+            frame, text="停止热键",
+            bg="#ffffff", fg="#222222",
+            font=self._font(8, True)
+        ).grid(row=1, column=0, sticky="w", pady=4)
+
+        stop_entry = ttk.Entry(
+            frame, textvariable=self.stop_hotkey, width=16,
+            font=self._font(8)
+        )
+        stop_entry.grid(row=1, column=1, padx=(10, 0))
+
+        def save():
+            try:
+                parse_hotkey(self.play_hotkey.get().strip())
+                parse_hotkey(self.stop_hotkey.get().strip())
+            except ValueError as e:
+                messagebox.showwarning("热键错误", str(e), parent=win)
+                return
+            self.register_hotkeys()
+            self._auto_save()
+            win.destroy()
+
+        ttk.Button(frame, text="保存", command=save).grid(
+            row=2, column=0, columnspan=2, pady=(10, 0)
+        )
+        win.bind("<Return>", lambda _e: save())
 
     def _refresh_status(self):
         if self.recording:
@@ -515,12 +633,12 @@ class App:
 
     def start_record(self):
         self.events.clear(); self.refresh(); self.last_event_time = None; self.down_keys.clear()
-        self.recording = True; self.rec_btn.config(text="⏹  停止录制")
+        self.recording = True; self.rec_btn.config(text="停止录制")
         self.status.set("录制中")
         self.hook_thread = threading.Thread(target=self._hook_worker, daemon=True); self.hook_thread.start()
 
     def stop_record(self):
-        self.recording = False; self.rec_btn.config(text="🔴  开始录制")
+        self.recording = False; self.rec_btn.config(text="开始录制")
         self.status.set(f"录制完成 · 共 {len(self.events)} 个动作")
         self._auto_save()
         if self.hook_thread and self.hook_thread.ident:
