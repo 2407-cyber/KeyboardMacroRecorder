@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-键盘快捷键录制器 v3 - 真实按下/松开时间版
+键盘快捷键录制器 v3.1 - 真实按下/松开时间版
 Windows 10/11
 
 核心：
@@ -73,20 +73,45 @@ class KBDLLHOOKSTRUCT(ctypes.Structure):
         ("dwExtraInfo", ctypes.POINTER(wintypes.ULONG)),
     ]
 
+# Windows INPUT/KEYBDINPUT must use ULONG_PTR and the real INPUT union layout.
+# The previous version used POINTER(ULONG), which changes alignment on 64-bit
+# Python and can make SendInput silently fail.
+ULONG_PTR = ctypes.c_size_t
+
 class KEYBDINPUT(ctypes.Structure):
     _fields_ = [
         ("wVk", wintypes.WORD),
         ("wScan", wintypes.WORD),
         ("dwFlags", wintypes.DWORD),
         ("time", wintypes.DWORD),
-        ("dwExtraInfo", ctypes.POINTER(wintypes.ULONG)),
+        ("dwExtraInfo", ULONG_PTR),
+    ]
+
+class MOUSEINPUT(ctypes.Structure):
+    _fields_ = [
+        ("dx", wintypes.LONG),
+        ("dy", wintypes.LONG),
+        ("mouseData", wintypes.DWORD),
+        ("dwFlags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ULONG_PTR),
+    ]
+
+class INPUT_UNION(ctypes.Union):
+    _fields_ = [
+        ("mi", MOUSEINPUT),
+        ("ki", KEYBDINPUT),
     ]
 
 class INPUT(ctypes.Structure):
+    _anonymous_ = ("u",)
     _fields_ = [
         ("type", wintypes.DWORD),
-        ("ki", KEYBDINPUT),
+        ("u", INPUT_UNION),
     ]
+
+user32.SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int]
+user32.SendInput.restype = wintypes.UINT
 
 HOOKPROC = ctypes.WINFUNCTYPE(
     ctypes.c_ssize_t, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM
@@ -122,8 +147,11 @@ def key_name(vk):
 def send_key(vk, down):
     inp = INPUT()
     inp.type = INPUT_KEYBOARD
-    inp.ki = KEYBDINPUT(vk, 0, 0 if down else KEYEVENTF_KEYUP, 0, None)
-    user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+    inp.ki = KEYBDINPUT(
+        int(vk), 0, 0 if down else KEYEVENTF_KEYUP, 0, 0
+    )
+    sent = user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+    return sent == 1
 
 def parse_hotkey(text):
     parts = [x.strip() for x in text.split("+") if x.strip()]
@@ -151,7 +179,7 @@ def parse_hotkey(text):
 class App:
     def __init__(self, root):
         self.root = root
-        self.root.title("键盘快捷键录制器 v3")
+        self.root.title("键盘快捷键录制器 v3.1")
         self.root.geometry("930x650")
         self.root.minsize(800, 570)
 
@@ -425,12 +453,16 @@ class App:
                         break
                     vk = int(e["vk"])
                     if e["action"] == "按下":
-                        send_key(vk, True)
+                        if not send_key(vk, True):
+                            raise RuntimeError(f"SendInput 发送失败，Windows 错误代码：{ctypes.get_last_error()}")
                         held.add(vk)
                     else:
-                        send_key(vk, False)
+                        if not send_key(vk, False):
+                            raise RuntimeError(f"SendInput 发送失败，Windows 错误代码：{ctypes.get_last_error()}")
                         held.discard(vk)
                 loops += 1
+        except Exception as e:
+            self.root.after(0, lambda err=str(e): messagebox.showerror("播放失败", err))
         finally:
             for vk in list(held):
                 send_key(vk, False)
